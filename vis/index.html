@@ -1,0 +1,236 @@
+﻿<!doctype html>
+<html>
+<head>
+    <title>Демонстрация работы с графом, список команд считывается из commands.js</title>
+  <meta charset="utf8"/>
+  <script type="text/javascript" src="vis.min.js"></script>
+  <link href="vis.min.css" rel="stylesheet" type="text/css" />
+
+  <style type="text/css">
+      #graphPanel {
+          width: 75%;
+          display: inline-block;
+          vertical-align: top;
+      }
+      #mynetwork {
+          height: 400px;
+          border: 1px solid lightgray;
+      }
+      #log {
+          width: 20%;
+          display: inline-block;
+      }
+  </style>
+</head>
+<body>
+
+    
+    <div class="content">
+        <div id="graphPanel">
+            <button id="next" onclick="restart()">Заново</button>
+            <button id="next" onclick="play()">Продолжить</button>
+            <button id="next" onclick="undo()">Назад</button>
+            <div id="mynetwork" class="vr"></div>
+            <div id="message">
+                Демонстрация работы с графом, список команд считывается из commands.js, обновить - F5
+            </div>
+
+        </div>
+
+        <select id="log" onchange="selCommand(this.value)" size="30"></select>
+    </div>
+    
+    <script type="text/javascript" src="commands.js" charset="windows-1251"></script>
+    <!-- считываем команды рисования в переменную commands-->
+
+    <script type="text/javascript">
+        "use strict";
+        var commands = prog.split("\n").filter(q => q.length > 0)
+        var log = document.getElementById('log');
+        var i = -1;
+        for (let c of commands) {
+            var opt = document.createElement("option");
+            i++;
+            opt.innerText = i + ": " + c;
+            opt.value = i;
+            log.appendChild(opt);
+        }
+
+        var nodes = new vis.DataSet([]); // вершины графа
+        var edges = new vis.DataSet([]); // рёбра графа
+        var network
+
+        var button = document.getElementById('next');
+        var message = document.getElementById('message');
+        var container = document.getElementById('mynetwork');
+        
+        function undo() {
+            if (undoStack.length == 0) return;
+            var f = undoStack.pop();
+            f();
+            step--;
+            log.value = step;
+        }
+
+        function addNode(id) {
+            nodes.add({ id: id, label: id });
+        }
+        var step = -1;
+
+        async function play() {
+            var c;
+            while (step < commands.length - 1) {
+                step++;
+                c = commands[step];
+                log.value = step;
+                if (c == "pause") {
+                    undoStack.push(() => { })
+                    break;
+                }
+                await cmd(c)
+            }
+            if (undoStack.length != step + 1) {
+                console.log(undoStack);
+                alert("error!");
+            }
+
+        }
+
+        async function restart() {
+            step = -1;
+            await play();
+        }
+
+        async function selCommand(num) {
+            if (num > step) {
+                var c;
+                while (step < num) {
+                    step++;
+                    c = commands[step];
+                    log.value = step;
+                    if (c == "pause" || c.startsWith('w,')) {
+                        undoStack.push(() => { });
+                    } else {
+                        await cmd(c);
+                    }
+                }
+            }
+            if (num < step) {
+                while (num < step) {
+                    undo();
+                }
+            }
+        }
+
+        var undoStack = [];
+
+        function copyNode(oldN, n) {
+            Object.assign(oldN, n);
+            if (typeof oldN.color == "undefined") {
+                oldN.color = null;
+            }
+            if (typeof oldN.label == "undefined") {
+                oldN.label = null;
+            }
+            if (typeof oldN.shape == "undefined") {
+                oldN.shape = null;
+            }
+        }
+
+        async function cmd(s) {
+            if (s == 'draw') {
+                network = new vis.Network(container, { nodes: nodes, edges: edges }, {});
+                undoStack.push(() => { })
+                return;
+            }
+            if (s == 'draw!') {
+                network = new vis.Network(container, { nodes: nodes, edges: edges }, { physics: false });
+                undoStack.push(() => { })
+                return;
+            }
+            if (s[0] == '#') return;
+
+            var a = s.split(/[,=]/)
+            if (a[0] == 'p') {
+                var oldHTML = message.innerHTML;
+                undoStack.push(() => { message.innerHTML = oldHTML })
+                message.innerHTML = s.substring(2)
+            } else if (a[0] == 'w') {
+                var ms = parseInt(a[1]);
+                await new Promise(resolve => setTimeout(resolve, ms));
+                undoStack.push(() => { })
+                console.log("Wait ok");
+
+            }
+            else if (!a[0].includes('-')) { // вершина
+                var n = nodes.get(a[0]), add = false;
+                var oldN = {};
+
+
+                if (n == null) {
+                    n = { id: a[0], label: a[0] };
+                    add = true;
+                } else {
+                    copyNode(oldN, n);
+                    console
+                }
+                for (var i = 1; i + 1 < a.length; i += 2) {
+                    c = a[i]; v = a[i + 1];
+                    if (c == 'label') n.label = v.replaceAll(';', '\n');
+                    if (c == 'label+') n.label += v.replaceAll(';', '\n');
+                    if (c == 'color') {
+                        var cols = v.split(';')
+                        n.color = cols[0];
+                        if (cols.length > 0) n.font = { color: cols[1] };
+                    }
+                    if (c == 'shape') n.shape = v;
+                    if (c == 'x') n.x = v;
+                    if (c == 'y') n.y = v;
+                }
+                if (add) {
+                    nodes.add(n);
+                    undoStack.push(() => { })
+                } else {
+                    nodes.update(n);
+                    undoStack.push(() => nodes.update(oldN))
+                }
+            } else {
+                var e = edges.get(a[0])
+                var c, v
+
+                if (e == null) {
+                    const b = a[0].split('-');
+                    if (nodes.get(b[0]) == null) addNode(b[0]);
+                    if (nodes.get(b[1]) == null) addNode(b[1]);
+                    edges.add({ id: a[0], from: b[0], to: b[1], color: { color: 'blue' } });
+                    e = edges.get(a[0])
+                }
+
+                var oldE = {};
+                Object.assign(oldE, e)
+
+                for (var i = 1; i + 1 < a.length; i += 2) {
+                    c = a[i]; v = a[i + 1];
+                    if (c == 'label') e.label = v.replaceAll(';', '\n');
+                    if (c == 'label+') e.label += v.replaceAll(';', '\n');
+                    if (c == 'color') {
+                        var cols = v.split(';')
+                        e.color = { color: cols[0] };
+                        if (cols.length > 0) e.font = { color: cols[1] };
+                    }
+                }
+                edges.update(e);
+                undoStack.push(() => { edges.update(oldE); })
+
+            }
+        }
+
+        play();
+
+
+
+    </script>
+
+
+</body>
+</html>
